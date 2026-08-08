@@ -1,6 +1,7 @@
 POST
 /v2/accounts/123/transactions
 true
+BodyParams: {"travel_rule_data":{"beneficiary_wallet_type":"WALLET_TYPE_SELF_HOSTED","is_self":"IS_SELF_FALSE","beneficiary_name":"Test Beneficiary","beneficiary_address":{"address1":"Test Street 1","address2":null,"address3":null,"city":"Berlin","state":null,"country":"DE","postal_code":"10115"},"beneficiary_financial_institution":"Test VASP","transfer_purpose":"Test"}}
 {
   "data": {
     "id": "3c04e35e-8e5a-5ff1-9155-00675db4ac02",

@@ -499,8 +499,9 @@ namespace Coinbase.Net.Interfaces.Clients.AdvancedTradeApi
         /// <param name="network">["<c>network</c>"] Network to use for the withdrawal</param>
         /// <param name="idempotencyToken">["<c>idem</c>"] If a previous transaction with the same idempotencyToken parameter exists for this sender, that previous transaction is returned and a new one is not created. Max length is 100 characters.</param>
         /// <param name="destinationTag">["<c>destination_tag</c>"] Destination tag</param>
+        /// <param name="travelRuleData">["<c>travel_rule_data</c>"] Travel Rule data</param>
         /// <param name="ct">Cancellation token</param>
-        Task<HttpResult<CoinbaseTransaction>> WithdrawCryptoAsync(string accountId, string to, decimal quantity, string asset, string? network = null, string? description = null, string? idempotencyToken = null, string? destinationTag = null, CancellationToken ct = default);
+        Task<HttpResult<CoinbaseTransaction>> WithdrawCryptoAsync(string accountId, string to, decimal quantity, string asset, string? network = null, string? description = null, string? idempotencyToken = null, string? destinationTag = null, CoinbaseTravelRule? travelRuleData = null, CancellationToken ct = default);
 
         /// <summary>
         /// Create a new deposit address for an account

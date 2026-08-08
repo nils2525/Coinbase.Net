@@ -551,7 +551,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
         #region Withdraw Crypto
 
         /// <inheritdoc />
-        public async Task<HttpResult<CoinbaseTransaction>> WithdrawCryptoAsync(string accountId, string to, decimal quantity, string asset, string? network = null, string? description = null, string? idempotencyToken = null, string? destinationTag = null, CancellationToken ct = default)
+        public async Task<HttpResult<CoinbaseTransaction>> WithdrawCryptoAsync(string accountId, string to, decimal quantity, string asset, string? network = null, string? description = null, string? idempotencyToken = null, string? destinationTag = null, CoinbaseTravelRule? travelRuleData = null, CancellationToken ct = default)
         {
             var parameters = new Parameters(CoinbaseExchange._parameterSerializationSettings);
             parameters.Add("type", "send");
@@ -562,6 +562,8 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
             parameters.Add("idem", idempotencyToken);
             parameters.Add("network", network);
             parameters.Add("destination_tag", destinationTag);
+            if (travelRuleData != null)
+                parameters.Add("travel_rule_data", travelRuleData);
             var request = _definitions.GetOrCreate(HttpMethod.Post, _baseClient.BaseAddress, $"/v2/accounts/{accountId}/transactions", CoinbaseExchange.RateLimiter.CoinbaseRestPublic, 1, true);
             var result = await _baseClient.SendAsync<CoinbaseTransactionWrapper>(request, parameters, ct).ConfigureAwait(false);
             if (!result.Success)

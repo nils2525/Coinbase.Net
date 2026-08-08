@@ -8,6 +8,7 @@ using Coinbase.Net.Enums;
 using CryptoExchange.Net.Authentication;
 using System.Linq;
 using Coinbase.Net.Objects;
+using Coinbase.Net.Objects.Models;
 
 namespace Coinbase.Net.UnitTests
 {
@@ -28,7 +29,26 @@ namespace Coinbase.Net.UnitTests
             await tester.ValidateAsync(client => client.AdvancedTradeApi.Account.GetFeeInfoAsync(), "GetFeeInfo2");
             await tester.ValidateAsync(client => client.AdvancedTradeApi.Account.GetApiKeyInfoAsync(), "GetApiKeyInfo");
             await tester.ValidateAsync(client => client.AdvancedTradeApi.Account.GetPaymentMethodsAsync(), "GetPaymentMethods", nestedJsonProperty: "payment_methods");
-            await tester.ValidateAsync(client => client.AdvancedTradeApi.Account.WithdrawCryptoAsync("123", "123", 0.1m, "123"), "WithdrawCrypto", "data");
+            await tester.ValidateAsync(client => client.AdvancedTradeApi.Account.WithdrawCryptoAsync(
+                "123",
+                "123",
+                0.1m,
+                "123",
+                travelRuleData: new CoinbaseTravelRule
+                {
+                    BeneficiaryWalletType = CoinbaseTravelRuleBeneficiaryWalletType.SelfHosted,
+                    IsSelf = CoinbaseTravelRuleIsSelf.False,
+                    BeneficiaryName = "Test Beneficiary",
+                    BeneficiaryAddress = new CoinbaseTravelRuleBeneficiaryAddress
+                    {
+                        Address1 = "Test Street 1",
+                        City = "Berlin",
+                        Country = "DE",
+                        PostalCode = "10115"
+                    },
+                    BeneficiaryFinancialInstitution = "Test VASP",
+                    TransferPurpose = "Test"
+                }), "WithdrawCrypto", "data");
             await tester.ValidateAsync(client => client.AdvancedTradeApi.Account.CreateDepositAddressAsync("123", "123"), "CreateDepositAddress", nestedJsonProperty: "data");
             await tester.ValidateAsync(client => client.AdvancedTradeApi.Account.GetDepositAddressAsync("123", "123"), "GetDepositAddress", "data", ignoreProperties: new List<string> { "callback_url" });
             await tester.ValidateAsync(client => client.AdvancedTradeApi.Account.GetAddressTransactionsAsync("123", "123"), "GetAddressTransactions");

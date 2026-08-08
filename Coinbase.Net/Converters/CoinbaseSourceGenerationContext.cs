@@ -158,6 +158,8 @@ namespace Coinbase.Net.Converters
     [JsonSerializable(typeof(CoinbaseTransaction[]))]
     [JsonSerializable(typeof(CoinbaseTransactionNetwork[]))]
     [JsonSerializable(typeof(CoinbaseTransactionDetails[]))]
+    [JsonSerializable(typeof(CoinbaseTravelRule))]
+    [JsonSerializable(typeof(CoinbaseTravelRuleBeneficiaryAddress))]
     [JsonSerializable(typeof(CoinbaseUserTrades[]))]
     [JsonSerializable(typeof(CoinbaseUserTrade[]))]
     [JsonSerializable(typeof(CoinbaseUserUpdate[]))]
