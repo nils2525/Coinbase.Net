@@ -3,6 +3,8 @@
 [![.NET](https://img.shields.io/github/actions/workflow/status/JKorf/Coinbase.Net/dotnet.yml?style=for-the-badge)](https://github.com/JKorf/Coinbase.Net/actions/workflows/dotnet.yml) ![License](https://img.shields.io/github/license/JKorf/Coinbase.Net?style=for-the-badge)
 ![Since](https://img.shields.io/badge/since-2024-brightgreen?style=for-the-badge)
 
+[![Docs](https://img.shields.io/badge/Docs-Coinbase.Net-1b7f50?style=for-the-badge)](https://cryptoexchange.jkorf.dev/docs/exchange-clients?library=Coinbase.Net)
+
 Coinbase.Net is a client library for accessing the [Coinbase Advanced Trade REST and Websocket API](https://docs.cdp.coinbase.com/advanced-trade/docs/welcome) and [Coinbase App REST API](https://docs.cdp.coinbase.com/coinbase-app/docs/welcome). 
 
 ## Features
@@ -17,6 +19,17 @@ Coinbase.Net is a client library for accessing the [Coinbase Advanced Trade REST
 * Support for different environments
 * Easy integration with other exchange client based on the CryptoExchange.Net base library
 * Native AOT support
+
+## Documentation
+
+The [Coinbase.Net documentation](https://cryptoexchange.jkorf.dev/docs/exchange-clients?library=Coinbase.Net) is the main resource for installing, configuring, and using the library.
+
+| Resource | Description |
+|--|--|
+| [Client guide](https://cryptoexchange.jkorf.dev/docs/exchange-clients?library=Coinbase.Net) | Installation, REST and WebSocket clients, authentication, dependency injection, error handling, and advanced features |
+| [Examples](https://cryptoexchange.jkorf.dev/docs/exchange-clients/examples?library=Coinbase.Net) | Common REST and WebSocket operations |
+| [API reference](https://cryptoexchange.jkorf.dev/docs/exchange-clients/reference?library=Coinbase.Net) | Client interfaces, methods, and properties |
+| [Shared API guide](https://cryptoexchange.jkorf.dev/docs/shared-api) | Common interfaces and models for working with multiple exchanges |
 
 ## Supported Frameworks
 The library is targeting both `.NET Standard 2.0` and `.NET Standard 2.1` for optimal compatibility, as well as the latest dotnet versions to use the latest framework features.
@@ -80,7 +93,53 @@ var tickerSubscriptionResult = socketClient.AdvancedTradeApi.SubscribeToTickerUp
 });
 ```
 
-For information on the clients, dependency injection, response processing and more see the [documentation](https://cryptoexchange.jkorf.dev?library=Coinbase.Net), or have a look at the examples [here](https://github.com/JKorf/Coinbase.Net/tree/main/Examples) or [here](https://github.com/JKorf/CryptoExchange.Net/tree/master/Examples).
+For more examples and explanations, continue with the [Coinbase.Net documentation](https://cryptoexchange.jkorf.dev/docs/exchange-clients?library=Coinbase.Net) or browse the [compilable repository examples](https://github.com/JKorf/Coinbase.Net/tree/main/Examples).
+
+## Shared / unified API
+
+The CryptoExchange.Net [Shared APIs](https://cryptoexchange.jkorf.dev/docs/shared-api) provide exchange-agnostic, unified interfaces for common operations such as retrieving tickers, order books and balances, placing orders, and subscribing to market updates.
+
+This allows the same application code to work with different exchange libraries. The supported Coinbase API surfaces expose their shared functionality through a `SharedClient` property. Because support differs between exchanges and API surfaces, call `Discover()` to inspect the available trading modes, environments, endpoints, and subscriptions at runtime.
+
+### Supported shared interfaces
+
+| API | Type | Supported interfaces |
+|--|--|--|
+| `AdvancedTradeApi` | REST | `IAssetsRestClient`, `IBalanceRestClient`, `IBookTickerRestClient`, `IDepositRestClient`, `IFeeRestClient`, `IFuturesOrderRestClient`, `IFuturesSymbolRestClient`, `IFuturesTickerRestClient`, `IFuturesTriggerOrderRestClient`, `IKlineRestClient`, `IOpenInterestRestClient`, `IOrderBookRestClient`, `IRecentTradeRestClient`, `ISpotOrderRestClient`, `ISpotSymbolRestClient`, `ISpotTickerRestClient`, `ISpotTriggerOrderRestClient`, `ITradeHistoryRestClient`, `IWithdrawalRestClient`, `IWithdrawRestClient` |
+| `AdvancedTradeApi` | WebSocket | `IFuturesOrderSocketClient`, `IKlineSocketClient`, `IPositionSocketClient`, `ISpotOrderSocketClient`, `ITickerSocketClient`, `ITradeSocketClient` |
+
+### Discover supported functionality
+
+```csharp
+var sharedClient = new CoinbaseRestClient().AdvancedTradeApi.SharedClient;
+var clientInfo = sharedClient.Discover();
+
+Console.WriteLine(clientInfo);
+```
+
+### Example
+
+```csharp
+using Coinbase.Net.Clients;
+using CryptoExchange.Net.SharedApis;
+
+var sharedClient = new CoinbaseRestClient().AdvancedTradeApi.SharedClient;
+ISpotTickerRestClient tickerClient = sharedClient;
+
+var symbol = new SharedSymbol(TradingMode.Spot, "ETH", "USDT");
+var result = await tickerClient.GetSpotTickerAsync(
+    new GetTickerRequest(symbol));
+
+if (!result.Success)
+{
+    Console.WriteLine(result.Error);
+    return;
+}
+
+Console.WriteLine(result.Data.LastPrice);
+```
+
+The request and response models belong to `CryptoExchange.Net.SharedApis`, so the same pattern can be used with another exchange's `SharedClient`.
 
 ## AI documentation
 This repository includes AI-focused guidance for generating correct Coinbase.Net code:
@@ -96,7 +155,7 @@ See [cryptoexchange-skills-hub](https://github.com/JKorf/cryptoexchange-skills-h
 ## CryptoExchange.Net
 Coinbase.Net is based on the [CryptoExchange.Net](https://github.com/JKorf/CryptoExchange.Net) base library. Other exchange API implementations based on the CryptoExchange.Net base library are available and follow the same logic.
 
-CryptoExchange.Net also allows for [easy access to different exchange API's](https://cryptoexchange.jkorf.dev/client-libs/shared).
+CryptoExchange.Net also provides [shared access to different exchange APIs](https://cryptoexchange.jkorf.dev/docs/shared-api).
 
 |Exchange|Repository|Nuget|
 |--|--|--|
@@ -121,9 +180,11 @@ CryptoExchange.Net also allows for [easy access to different exchange API's](htt
 |Gate.io|[JKorf/GateIo.Net](https://github.com/JKorf/GateIo.Net)|[![Nuget version](https://img.shields.io/nuget/v/GateIo.net.svg?style=flat-square)](https://www.nuget.org/packages/GateIo.Net)|
 |Kraken|[JKorf/Kraken.Net](https://github.com/JKorf/Kraken.Net)|[![Nuget version](https://img.shields.io/nuget/v/KrakenExchange.net.svg?style=flat-square)](https://www.nuget.org/packages/KrakenExchange.Net)|
 |Kucoin|[JKorf/Kucoin.Net](https://github.com/JKorf/Kucoin.Net)|[![Nuget version](https://img.shields.io/nuget/v/Kucoin.net.svg?style=flat-square)](https://www.nuget.org/packages/Kucoin.Net)|
+|LBank|[JKorf/LBank.Net](https://github.com/JKorf/LBank.Net)|[![Nuget version](https://img.shields.io/nuget/v/LBank.net.svg?style=flat-square)](https://www.nuget.org/packages/LBank.Net)|
 |Lighter|[JKorf/Lighter.Net](https://github.com/JKorf/Lighter.Net)|[![Nuget version](https://img.shields.io/nuget/v/JKorf.Lighter.net.svg?style=flat-square)](https://www.nuget.org/packages/JKorf.Lighter.Net)|
 |Mexc|[JKorf/Mexc.Net](https://github.com/JKorf/Mexc.Net)|[![Nuget version](https://img.shields.io/nuget/v/JK.Mexc.net.svg?style=flat-square)](https://www.nuget.org/packages/JK.Mexc.Net)|
 |OKX|[JKorf/OKX.Net](https://github.com/JKorf/OKX.Net)|[![Nuget version](https://img.shields.io/nuget/v/JK.OKX.net.svg?style=flat-square)](https://www.nuget.org/packages/JK.OKX.Net)|
+|Pionex|[JKorf/Pionex.Net](https://github.com/JKorf/Pionex.Net)|[![Nuget version](https://img.shields.io/nuget/v/Pionex.net.svg?style=flat-square)](https://www.nuget.org/packages/Pionex.Net)|
 |Polymarket|[JKorf/Polymarket.Net](https://github.com/JKorf/Polymarket.Net)|[![Nuget version](https://img.shields.io/nuget/v/Polymarket.net.svg?style=flat-square)](https://www.nuget.org/packages/Polymarket.Net)|
 |Toobit|[JKorf/Toobit.Net](https://github.com/JKorf/Toobit.Net)|[![Nuget version](https://img.shields.io/nuget/v/Toobit.net.svg?style=flat-square)](https://www.nuget.org/packages/Toobit.Net)|
 |Upbit|[JKorf/Upbit.Net](https://github.com/JKorf/Upbit.Net)|[![Nuget version](https://img.shields.io/nuget/v/JKorf.Upbit.net.svg?style=flat-square)](https://www.nuget.org/packages/JKorf.Upbit.Net)|
@@ -182,16 +243,43 @@ If you do not yet have an account please consider using this referal link to sig
 [Link](https://advanced.coinbase.com/join/T6H54H8)
 
 ### Donate
-Make a one time donation in a crypto currency of your choice. If you prefer to donate a currency not listed here please contact me.
-
-**Btc**:  bc1q277a5n54s2l2mzlu778ef7lpkwhjhyvghuv8qf  
-**Eth**:  0xcb1b63aCF9fef2755eBf4a0506250074496Ad5b7   
+Make a one time donation in a crypto currency of your choice. If you prefer to donate in a different currency or network send me a message.
+   
 **USDT (TRX)**  TKigKeJPXZYyMVDgMyXxMf17MWYia92Rjd 
 
 ### Sponsor
 Alternatively, sponsor me on Github using [Github Sponsors](https://github.com/sponsors/JKorf). 
 
 ## Release notes
+* Version 4.4.0 - 06 Aug 2026
+    * Fixed deserialization issue INTX perpetual balances response
+    * Fixed incorrect Shared GetBalancesAsync asset name mapping for Perpetual futures
+    * Fixed some documentation links
+
+* Version 4.3.0 - 29 Jul 2026
+    * Updated CryptoExchange.Net to version 12.4.0
+    * Added calculation of AveragePrice on Shared order models if data is available and AveragePrice is not set
+    * Added DebuggerDisplay attributes to Result models
+    * Added AveragePrice property to SharedQuantity model
+    * Added DestinationTagRegex, DestinationTagName to CoinbaseCryptoAsset model
+    * Added Exchange property to CoinbaseTrade model
+    * Updated CoinbaseSymbol with various missing properties
+    * Updated Shared GetSpotTickersAsync/GetFuturesTickersAsync model mapping to include new high and low price info
+    * Updated SharedFuturesTicker, SharedSpotTicker, SharedTrade and SharedKline to use SharedOrderQuantity for volumes/quantities
+    * Updated documentation references
+
+* Version 4.2.0 - 21 Jul 2026
+    * Updated CryptoExchange.Net to v12.2.0 
+    * Added SpotSymbolCatalog to Shared ISpotSymbolRestClient interface
+    * Added FuturesSymbolCatalog to Shared IFuturesSymbolRestClient interface
+    * Added BaseAssetType, BaseAssetSubType, QuoteAssetType and QuoteAssetSubType to GetSymbolsRequest model
+    * Added DisplayName to SharedSpotSymbol and SharedFuturesSymbol models
+    * Added BaseAssetType, BaseAssetSubType, QuoteAssetType and QuoteAssetSubType to SharedSpotSymbol and SharedFuturesSymbol models
+    * Added DebuggerDisplay attributes to Shared models
+    * Added FuturesAssetType to CoinbaseSymbolFuturesDetails model
+    * Added IndexPrice to CoinbaseSymbolFuturesDetails model
+    * Updated UnderlyingType to Enum in CoinbaseSymbolPerpDetails model
+
 * Version 4.1.0 - 09 Jul 2026
     * Updated CryptoExchange.Net to v12.1.0
     * Updated AuthenticationProvider token creation

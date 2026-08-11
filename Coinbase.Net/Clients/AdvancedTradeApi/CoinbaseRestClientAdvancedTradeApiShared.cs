@@ -26,6 +26,8 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
         public void ResetDefaultExchangeParameters() => ExchangeParameters.ResetStaticParameters();
         public SharedClientInfo Discover() => SharedUtils.GetClientInfo(CoinbaseExchange.Metadata, this);
 
+        private static readonly HashSet<string> _exchangeSupportedFiat = ["USD", "EUR", "GBP", "INR", "AUD", "CAD", "SGD"];
+
         #region Asset client
         GetAssetsOptions IAssetsRestClient.GetAssetsOptions { get; } = new GetAssetsOptions(_exchangeName, false);
 
@@ -126,10 +128,17 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 if (!result.Success)
                     return HttpResult.Fail<SharedBalance[]>(result);
 
-                return HttpResult.Ok(result, result.Data.Balances.Select(x => 
+                // The endpoint answers with one entry per portfolio; take the requested one, falling
+                // back to the single entry a portfolio-scoped key returns without echoing its uuid.
+                var portfolio = result.Data.FirstOrDefault(x => x.PortfolioId == portfolioId)
+                    ?? result.Data.FirstOrDefault();
+                if (portfolio == null)
+                    return HttpResult.Ok(result, Array.Empty<SharedBalance>());
+
+                return HttpResult.Ok(result, portfolio.Balances.Select(x =>
                     new SharedBalance(
-                        TradingMode.PerpetualLinear, 
-                        x.Asset.AssetId, 
+                        TradingMode.PerpetualLinear,
+                        x.Asset.AssetName,
                         x.MaxWithdrawQuantity,
                         x.Quantity)).ToArray());
             }
@@ -290,7 +299,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
 
             // Return
             return HttpResult.Ok(result, result.Data.Trades.Select(x => 
-            new SharedTrade(request.Symbol, symbol, x.Quantity, x.Price, x.Timestamp)
+            new SharedTrade(request.Symbol, symbol, new SharedOrderQuantity(x.Quantity), x.Price, x.Timestamp)
             {
                 Side = x.OrderSide == OrderSide.Buy ? SharedOrderSide.Buy : SharedOrderSide.Sell
             }).ToArray());
@@ -332,7 +341,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
 
             return HttpResult.Ok(result, ExchangeHelpers.ApplyFilter(result.Data.Trades, x => x.Timestamp, request.StartTime, request.EndTime, direction)
                        .Select(x =>  
-                            new SharedTrade(request.Symbol, symbol, x.Quantity, x.Price, x.Timestamp)
+                            new SharedTrade(request.Symbol, symbol, new SharedOrderQuantity(x.Quantity), x.Price, x.Timestamp)
                             {
                                 Side = x.OrderSide == OrderSide.Buy ? SharedOrderSide.Buy : SharedOrderSide.Sell
                             })
@@ -452,6 +461,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
         #endregion
 
         #region Spot Symbol client
+        SharedSymbolCatalog? ISpotSymbolRestClient.SpotSymbolCatalog => ExchangeSymbolCache.GetSymbolCatalog(_exchangeName, _topicSpotId, EnvironmentName, null);
         GetSpotSymbolsOptions ISpotSymbolRestClient.GetSpotSymbolsOptions { get; } = new GetSpotSymbolsOptions(_exchangeName, false);
 
         async Task<HttpResult<SharedSpotSymbol[]>> ISpotSymbolRestClient.GetSpotSymbolsAsync(GetSymbolsRequest request, CancellationToken ct)
@@ -468,20 +478,52 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
             // For example both BTC-USD and BTC-USDC is returned, referring to the same symbol
             // Also, when for example subscribing to BTC-USDC in update the name is BTC-USD instead
             // The library uses the BTC-USDC notation
-            var symbolData = result.Data.Select(s => new SharedSpotSymbol(s.BaseAsset, s.QuoteAsset, s.Symbol, s.SymbolStatus == SymbolStatus.Online && !s.IsDisabled && !s.TradingDisabled)
+            var data = result.Data
+                .Select(x => ParseSpotSymbol(x))
+                .ToArray();
+
+            var resultData = data.Where(x => x.QuoteAsset != "USD").ToArray();
+            foreach (var item in data.Where(x => x.QuoteAsset == "USD"))
+                item.QuoteAsset = "USDC";
+
+            ExchangeSymbolCache.UpdateSymbolInfo(_topicSpotId, EnvironmentName, null, data);
+            return HttpResult.Ok(result, SharedUtils.ApplySymbolFilter(resultData, request));
+        }
+
+        private SharedSpotSymbol ParseSpotSymbol(CoinbaseSymbol s)
+        {
+            var result = new SharedSpotSymbol(s.BaseAsset, s.QuoteAsset, s.Symbol, s.SymbolStatus == SymbolStatus.Online && !s.IsDisabled && !s.TradingDisabled)
             {
                 MinTradeQuantity = s.MinOrderQuantity,
                 MaxTradeQuantity = s.MaxOrderQuantity,
                 QuantityStep = s.QuantityStep,
-                PriceStep = s.PriceStep
-            }).ToArray();
+                PriceStep = s.PriceStep,
+                DisplayName = s.DisplayName
+            };
 
-            var originalSymbols = symbolData.Where(x => x.QuoteAsset != "USD").ToArray();
-            foreach (var item in symbolData.Where(x => x.QuoteAsset == "USD"))            
-                item.QuoteAsset = "USDC";            
+            if (_exchangeSupportedFiat.Contains(s.QuoteAsset))
+            {
+                result.QuoteAssetType = SharedAssetType.Fiat;
+            }
+            else
+            {
+                result.QuoteAssetType = SharedAssetType.Crypto;
+                if (LibraryHelpers.IsStableCoin(s.QuoteAsset))
+                    result.QuoteAssetSubType = SharedAssetSubType.StableCoin;
+            }
 
-            ExchangeSymbolCache.UpdateSymbolInfo(_topicSpotId, EnvironmentName, null, symbolData);
-            return HttpResult.Ok(result, originalSymbols);
+            if (_exchangeSupportedFiat.Contains(s.BaseAsset))
+            {
+                result.BaseAssetType = SharedAssetType.Fiat;
+            }
+            else
+            {
+                result.BaseAssetType = SharedAssetType.Crypto;
+                if (LibraryHelpers.IsStableCoin(s.BaseAsset))
+                    result.BaseAssetSubType = SharedAssetSubType.StableCoin;
+            }
+
+            return result;
         }
 
         async Task<ExchangeCallResult<SharedSymbol[]>> ISpotSymbolRestClient.GetSpotSymbolsForBaseAssetAsync(string baseAsset)
@@ -537,9 +579,15 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
             if (!result.Success)
                 return HttpResult.Fail<SharedSpotTicker>(result);
 
-            return HttpResult.Ok(result, new SharedSpotTicker(ExchangeSymbolCache.ParseSymbol(_topicSpotId, EnvironmentName, null, result.Data.Symbol), result.Data.Symbol, result.Data.LastPrice, null, null, result.Data.Volume24h ?? 0, result.Data.PricePercentageChange24h)
+            return HttpResult.Ok(result, new SharedSpotTicker(
+                ExchangeSymbolCache.ParseSymbol(_topicSpotId, EnvironmentName, null, result.Data.Symbol), 
+                result.Data.Symbol, 
+                result.Data.LastPrice,
+                result.Data.HighPrice24h,
+                result.Data.LowPrice24h,
+                new SharedOrderQuantity(result.Data.Volume24h, result.Data.ApproximateQuote24hVolume),
+                result.Data.PricePercentageChange24h)
             {
-                QuoteVolume = result.Data.ApproximateQuote24hVolume
             });
         }
 
@@ -555,10 +603,17 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 return HttpResult.Fail<SharedSpotTicker[]>(result);
 
             var originalSymbols = result.Data.Where(x => x.QuoteAsset != "USD").ToArray();
-            return HttpResult.Ok(result, originalSymbols.Select(x => new SharedSpotTicker(ExchangeSymbolCache.ParseSymbol(_topicSpotId, EnvironmentName, null, x.Symbol), x.Symbol, x.LastPrice, null, null, x.Volume24h ?? 0, x.PricePercentageChange24h)
-            {
-                QuoteVolume = x.ApproximateQuote24hVolume
-            }).ToArray());
+            return HttpResult.Ok(result, originalSymbols.Select(x => 
+                new SharedSpotTicker(
+                    ExchangeSymbolCache.ParseSymbol(_topicSpotId, EnvironmentName, null, x.Symbol),
+                    x.Symbol,
+                    x.LastPrice,
+                    x.HighPrice24h, 
+                    x.LowPrice24h,
+                    new SharedOrderQuantity(x.Volume24h, x.ApproximateQuote24hVolume),
+                    x.PricePercentageChange24h)
+                {
+                }).ToArray());
         }
 
         #endregion
@@ -884,7 +939,15 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
             if (!resultTicker.Success)
                 return HttpResult.Fail<SharedFuturesTicker>(resultTicker);
 
-            return HttpResult.Ok(resultTicker, new SharedFuturesTicker(ExchangeSymbolCache.ParseSymbol(_topicFuturesId, EnvironmentName, null, resultTicker.Data.Symbol), resultTicker.Data.Symbol, resultTicker.Data.LastPrice, null, null, resultTicker.Data.Volume24h ?? 0, resultTicker.Data.PricePercentageChange24h)
+            return HttpResult.Ok(resultTicker, 
+                new SharedFuturesTicker(
+                    ExchangeSymbolCache.ParseSymbol(_topicFuturesId, EnvironmentName, null, resultTicker.Data.Symbol),
+                    resultTicker.Data.Symbol,
+                    resultTicker.Data.LastPrice,
+                    resultTicker.Data.HighPrice24h, 
+                    resultTicker.Data.LowPrice24h,
+                    new SharedOrderQuantity(resultTicker.Data.Volume24h, resultTicker.Data.ApproximateQuote24hVolume),
+                    resultTicker.Data.PricePercentageChange24h)
             {
                 FundingRate = resultTicker.Data.FutureProductDetails!.PerpetualDetails!.FundingRate,
                 NextFundingTime = resultTicker.Data.FutureProductDetails.PerpetualDetails.FundingTime
@@ -905,7 +968,14 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
 
             var data = resultTicker.Data;
             return HttpResult.Ok(resultTicker, data.Select(x => 
-                    new SharedFuturesTicker(ExchangeSymbolCache.ParseSymbol(_topicFuturesId, EnvironmentName, null, x.Symbol), x.Symbol, x.LastPrice, null, null, x.Volume24h ?? 0, x.PricePercentageChange24h)
+                    new SharedFuturesTicker(
+                        ExchangeSymbolCache.ParseSymbol(_topicFuturesId, EnvironmentName, null, x.Symbol),
+                        x.Symbol,
+                        x.LastPrice,
+                        x.HighPrice24h, 
+                        x.LowPrice24h, 
+                        new SharedOrderQuantity(x.Volume24h, x.ApproximateQuote24hVolume),
+                        x.PricePercentageChange24h)
                     {
                         FundingRate = x.FutureProductDetails!.PerpetualDetails?.FundingRate,
                         NextFundingTime = x.FutureProductDetails.PerpetualDetails?.FundingTime
@@ -916,6 +986,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
 
         #region Futures Symbol client
 
+        SharedSymbolCatalog? IFuturesSymbolRestClient.FuturesSymbolCatalog => ExchangeSymbolCache.GetSymbolCatalog(_exchangeName, _topicFuturesId, EnvironmentName, null);
         GetFuturesSymbolsOptions IFuturesSymbolRestClient.GetFuturesSymbolsOptions { get; } = new GetFuturesSymbolsOptions(_exchangeName, false);
         async Task<HttpResult<SharedFuturesSymbol[]>> IFuturesSymbolRestClient.GetFuturesSymbolsAsync(GetSymbolsRequest request, CancellationToken ct)
         {
@@ -924,33 +995,99 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 return HttpResult.Fail<SharedFuturesSymbol[]>(Exchange, validationError);
 
             var expiringTime = request.TradingMode == null || request.TradingMode == TradingMode.PerpetualLinear ? ContractExpiryType.Perpetual : ContractExpiryType.Expiring;
-            var resultTicker = await ExchangeData.GetSymbolsAsync(SymbolType.Futures, expiryType: expiringTime, ct: ct).ConfigureAwait(false);
-            if (!resultTicker.Success)
-                return HttpResult.Fail<SharedFuturesSymbol[]>(resultTicker);
+            var result = await ExchangeData.GetSymbolsAsync(SymbolType.Futures, expiryType: expiringTime, ct: ct).ConfigureAwait(false);
+            if (!result.Success)
+                return HttpResult.Fail<SharedFuturesSymbol[]>(result);
 
-            var data = resultTicker.Data;
+            var data = result.Data
+                .Select(x => ParseFuturesSymbol(x))
+                .ToArray();
 
-            var response = HttpResult.Ok(resultTicker,
-                data.Select(x =>
-                    new SharedFuturesSymbol(
-                        x.FutureProductDetails!.ContractExpiry == null ? TradingMode.PerpetualLinear: TradingMode.DeliveryLinear,
+            ExchangeSymbolCache.UpdateSymbolInfo(_topicFuturesId, EnvironmentName, expiringTime.ToString(), data);
+            return HttpResult.Ok(result, SharedUtils.ApplySymbolFilter(data, request));
+        }
+
+        private SharedFuturesSymbol ParseFuturesSymbol(CoinbaseSymbol x)
+        {
+            var result = new SharedFuturesSymbol(
+                        x.FutureProductDetails!.ContractExpiry == null ? TradingMode.PerpetualLinear : TradingMode.DeliveryLinear,
                         x.FutureProductDetails.ContractCode,
                         x.QuoteAsset,
                         x.Symbol,
                         x.SymbolStatus == SymbolStatus.Online && !x.IsDisabled && !x.TradingDisabled)
-                    {
-                        MinTradeQuantity = x.MinOrderQuantity,
-                        MaxTradeQuantity = x.MaxOrderQuantity,
-                        QuantityStep = x.QuantityStep,
-                        PriceStep = x.PriceStep,
-                        ContractSize = x.FutureProductDetails.ContractSize,
-                        DeliveryTime = x.FutureProductDetails.ContractExpiry,
-                        MaxLongLeverage = x.FutureProductDetails.PerpetualDetails?.MaxLeverage,
-                        MaxShortLeverage = x.FutureProductDetails.PerpetualDetails?.MaxLeverage
-                    }).ToArray());
+            {
+                MinTradeQuantity = x.MinOrderQuantity,
+                MaxTradeQuantity = x.MaxOrderQuantity,
+                QuantityStep = x.QuantityStep,
+                PriceStep = x.PriceStep,
+                ContractSize = x.FutureProductDetails.ContractSize,
+                DeliveryTime = x.FutureProductDetails.ContractExpiry,
+                MaxLongLeverage = x.FutureProductDetails.PerpetualDetails?.MaxLeverage,
+                MaxShortLeverage = x.FutureProductDetails.PerpetualDetails?.MaxLeverage,
+                DisplayName = x.DisplayName
+            };
 
-            ExchangeSymbolCache.UpdateSymbolInfo(_topicFuturesId, EnvironmentName, null, response.Data!);
-            return response;
+            if (_exchangeSupportedFiat.Contains(x.QuoteAsset))
+            {
+                result.QuoteAssetType = SharedAssetType.Fiat;
+            }
+            else
+            {
+                result.QuoteAssetType = SharedAssetType.Crypto;
+                if (LibraryHelpers.IsStableCoin(x.QuoteAsset))
+                    result.QuoteAssetSubType = SharedAssetSubType.StableCoin;
+            }
+
+            if (x.FutureProductDetails == null)
+            {
+                // Shouldn't be null for futures symbols, but just in case
+                result.BaseAssetType = SharedAssetType.Unspecified;
+            }
+            else
+            {
+                if (result.TradingMode.IsPerpetual())
+                {
+                    if (x.FutureProductDetails.PerpetualDetails?.UnderlyingType == UnderlyingType.Equity
+                        || x.FutureProductDetails.PerpetualDetails?.UnderlyingType == UnderlyingType.EquityEtf
+                        || x.FutureProductDetails.PerpetualDetails?.UnderlyingType == UnderlyingType.Index)
+                    {
+                        result.BaseAssetType = SharedAssetType.TradFi;
+                        result.BaseAssetSubType = SharedAssetSubType.Equity;
+                    }
+                    else if (x.FutureProductDetails.PerpetualDetails?.UnderlyingType == UnderlyingType.Commodity)
+                    {
+                        result.BaseAssetType = SharedAssetType.TradFi;
+                        result.BaseAssetSubType = SharedAssetSubType.Commodity;
+                    }
+                    else
+                    {
+                        result.BaseAssetType = SharedAssetType.Crypto;
+                        if (LibraryHelpers.IsStableCoin(x.BaseAsset))
+                            result.BaseAssetSubType = SharedAssetSubType.StableCoin;
+                    }
+                }
+                else
+                {
+                    if (x.FutureProductDetails.FuturesAssetType == FuturesAssetType.Stocks)
+                    {
+                        result.BaseAssetType = SharedAssetType.TradFi;
+                        result.BaseAssetSubType = SharedAssetSubType.Equity;
+                    }
+                    else if (x.FutureProductDetails.FuturesAssetType == FuturesAssetType.Energy
+                        || x.FutureProductDetails.FuturesAssetType == FuturesAssetType.Metals)
+                    {
+                        result.BaseAssetType = SharedAssetType.TradFi;
+                        result.BaseAssetSubType = SharedAssetSubType.Commodity;
+                    }
+                    else
+                    {
+                        result.BaseAssetType = SharedAssetType.Crypto;
+                    }
+                }
+            }
+
+
+            return result;
         }
 
         async Task<ExchangeCallResult<SharedSymbol[]>> IFuturesSymbolRestClient.GetFuturesSymbolsForBaseAssetAsync(string baseAsset)
@@ -1385,7 +1522,15 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
 
             return HttpResult.Ok(result, ExchangeHelpers.ApplyFilter(result.Data, x => x.OpenTime, request.StartTime, request.EndTime, direction)
                    .Select(x => 
-                        new SharedKline(request.Symbol, symbol, x.OpenTime, x.ClosePrice, x.HighPrice, x.LowPrice, x.OpenPrice, x.Volume))
+                        new SharedKline(
+                            request.Symbol,
+                            symbol,
+                            x.OpenTime,
+                            x.ClosePrice,
+                            x.HighPrice,
+                            x.LowPrice,
+                            x.OpenPrice,
+                            new SharedOrderQuantity(x.Volume)))
                    .ToArray(), nextPageRequest);
         }
 
