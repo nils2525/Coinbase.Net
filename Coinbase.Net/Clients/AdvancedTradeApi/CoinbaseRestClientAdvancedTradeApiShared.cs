@@ -274,7 +274,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
             if (!result.Success)
                 return HttpResult.Fail<SharedOrderBook>(result);
 
-            return HttpResult.Ok(result, new SharedOrderBook(result.Data.Asks, result.Data.Bids));
+            return HttpResult.Ok(result, new SharedOrderBook(SharedQuantityType.BaseAsset, result.Data.Asks, result.Data.Bids));
         }
 
         #endregion
@@ -498,7 +498,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 MaxTradeQuantity = s.MaxOrderQuantity,
                 QuantityStep = s.QuantityStep,
                 PriceStep = s.PriceStep,
-                DisplayName = s.DisplayName
+                DisplayName = s.DisplayName,
             };
 
             if (_exchangeSupportedFiat.Contains(s.QuoteAsset))
@@ -635,9 +635,9 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 ExchangeSymbolCache.ParseSymbol(request.Symbol!.TradingMode == TradingMode.Spot ? _topicSpotId : _topicFuturesId, EnvironmentName, null, resultTicker.Data.Symbol),
                 resultTicker.Data.Symbol,
                 resultTicker.Data.BestAskPrice,
-                resultTicker.Data.BestAskQuantity,
+                new SharedOrderQuantity(resultTicker.Data.BestAskQuantity),
                 resultTicker.Data.BestBidPrice,
-                resultTicker.Data.BestBidQuantity));
+                new SharedOrderQuantity(resultTicker.Data.BestBidQuantity)));
         }
 
         #endregion
@@ -818,7 +818,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 x.OrderId,
                 x.TradeId,
                 x.OrderSide == OrderSide.Buy ? SharedOrderSide.Buy : SharedOrderSide.Sell,
-                x.QuantityInQuoteAsset ? (x.Quantity / x.Price) : x.Quantity,
+                new SharedOrderQuantity(x.QuantityInQuoteAsset ? (x.Quantity / x.Price) : x.Quantity),
                 x.Price,
                 x.Timestamp)
             {
@@ -866,7 +866,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                                 x.OrderId,
                                 x.TradeId,
                                 x.OrderSide == OrderSide.Buy ? SharedOrderSide.Buy : SharedOrderSide.Sell,
-                                x.QuantityInQuoteAsset ? (x.Quantity / x.Price) : x.Quantity,
+                                new SharedOrderQuantity(x.QuantityInQuoteAsset ? (x.Quantity / x.Price) : x.Quantity),
                                 x.Price,
                                 x.Timestamp)
                             {
@@ -949,8 +949,13 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                     new SharedOrderQuantity(resultTicker.Data.Volume24h, resultTicker.Data.ApproximateQuote24hVolume),
                     resultTicker.Data.PricePercentageChange24h)
             {
-                FundingRate = resultTicker.Data.FutureProductDetails!.PerpetualDetails!.FundingRate,
-                NextFundingTime = resultTicker.Data.FutureProductDetails.PerpetualDetails.FundingTime
+                // Null-conditional, not null-forgiving: both properties are declared nullable, and a
+                // DATED CDE contract (XPP-20DEC30-CDE) legitimately carries no PerpetualDetails —
+                // funding is a perpetual-swap mechanism, a dated future converges by expiry instead.
+                // The `!` pair threw a NullReferenceException out of the shared client for every dated
+                // futures symbol (observed 2026-08-04). No funding is the honest answer, not a crash.
+                FundingRate = resultTicker.Data.FutureProductDetails?.PerpetualDetails?.FundingRate,
+                NextFundingTime = resultTicker.Data.FutureProductDetails?.PerpetualDetails?.FundingTime
             });
         }
 
@@ -977,8 +982,9 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                         new SharedOrderQuantity(x.Volume24h, x.ApproximateQuote24hVolume),
                         x.PricePercentageChange24h)
                     {
-                        FundingRate = x.FutureProductDetails!.PerpetualDetails?.FundingRate,
-                        NextFundingTime = x.FutureProductDetails.PerpetualDetails?.FundingTime
+                        // Same dated-CDE null-safety as GetFuturesTickerAsync above.
+                        FundingRate = x.FutureProductDetails?.PerpetualDetails?.FundingRate,
+                        NextFundingTime = x.FutureProductDetails?.PerpetualDetails?.FundingTime
                     }).ToArray());
         }
 
@@ -1068,13 +1074,15 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 }
                 else
                 {
-                    if (x.FutureProductDetails.FuturesAssetType == FuturesAssetType.Stocks)
+                    if (x.FutureProductDetails.FuturesAssetType == FuturesAssetType.Stocks
+                        || x.FutureProductDetails.FuturesAssetType == FuturesAssetType.Commodities)
                     {
                         result.BaseAssetType = SharedAssetType.TradFi;
                         result.BaseAssetSubType = SharedAssetSubType.Equity;
                     }
                     else if (x.FutureProductDetails.FuturesAssetType == FuturesAssetType.Energy
-                        || x.FutureProductDetails.FuturesAssetType == FuturesAssetType.Metals)
+                        || x.FutureProductDetails.FuturesAssetType == FuturesAssetType.Metals
+                        || x.FutureProductDetails.FuturesAssetType == FuturesAssetType.Commodities)
                     {
                         result.BaseAssetType = SharedAssetType.TradFi;
                         result.BaseAssetSubType = SharedAssetSubType.Commodity;
@@ -1133,7 +1141,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
 
         #region Open Interest client
 
-        GetOpenInterestOptions IOpenInterestRestClient.GetOpenInterestOptions { get; } = new GetOpenInterestOptions(_exchangeName, true);
+        GetOpenInterestOptions IOpenInterestRestClient.GetOpenInterestOptions { get; } = new GetOpenInterestOptions(_exchangeName, false);
         async Task<HttpResult<SharedOpenInterest>> IOpenInterestRestClient.GetOpenInterestAsync(GetOpenInterestRequest request, CancellationToken ct)
         {
             var validationError = SharedClient.GetOpenInterestOptions.ValidateRequest(request, this);
@@ -1144,7 +1152,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
             if (!result.Success)
                 return HttpResult.Fail<SharedOpenInterest>(result);
 
-            return HttpResult.Ok(result, new SharedOpenInterest(result.Data.FutureProductDetails!.PerpetualDetails?.OpenInterest ?? 0));
+            return HttpResult.Ok(result, new SharedOpenInterest(new SharedOrderQuantity(result.Data.FutureProductDetails!.PerpetualDetails?.OpenInterest ?? 0)));
         }
 
         #endregion
@@ -1182,7 +1190,11 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 price: request.Price,
                 leverage: request.Leverage,
                 marginType: request.MarginMode == null ? null : request.MarginMode == SharedMarginMode.Cross ? MarginType.Cross : MarginType.Isolated,
-                postOnly: request.OrderType == SharedOrderType.LimitMaker,
+                // null, not false, for anything that is not post-only: post_only is not a field of the
+                // market_market_ioc configuration, and Coinbase rejects the whole order with
+                // 'proto: unknown field "post_only"' when it is sent on a futures market order
+                // (observed 2026-08-03). Same shape the spot path already uses.
+                postOnly: request.OrderType == SharedOrderType.LimitMaker ? true : null,
                 clientOrderId: request.ClientOrderId,
                 ct: ct).ConfigureAwait(false);
 
@@ -1339,7 +1351,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 x.OrderId,
                 x.TradeId,
                 x.OrderSide == OrderSide.Buy ? SharedOrderSide.Buy : SharedOrderSide.Sell,
-                x.Quantity,
+                new SharedOrderQuantity(x.Quantity),
                 x.Price,
                 x.Timestamp)
             {
@@ -1387,7 +1399,7 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                                 x.OrderId,
                                 x.TradeId,
                                 x.OrderSide == OrderSide.Buy ? SharedOrderSide.Buy : SharedOrderSide.Sell,
-                                x.Quantity,
+                                new SharedOrderQuantity(x.Quantity),
                                 x.Price,
                                 x.Timestamp)
                             {
@@ -1429,15 +1441,20 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 if (!result.Success)
                     return HttpResult.Fail<SharedPosition[]>(result);
 
-                return HttpResult.Ok(result, result.Data.Positions.Select(x => new SharedPosition(ExchangeSymbolCache.ParseSymbol(_topicFuturesId, EnvironmentName, null, x.Symbol), x.Symbol, Math.Abs(x.NetQuantity), null)
-                {
-                    UnrealizedPnl = x.UnrealizedPnl.Value,
-                    LiquidationPrice = x.LiquidationPrice.Value == 0 ? null : x.LiquidationPrice.Value,
-                    Leverage = x.Leverage,
-                    AverageOpenPrice = x.EntryVolumeWeightedAveragePrice.Value,
-                    PositionMode = SharedPositionMode.HedgeMode,
-                    PositionSide = x.PositionSide == PositionSide.Short ? SharedPositionSide.Short : SharedPositionSide.Long
-                }).ToArray());
+                return HttpResult.Ok(result, result.Data.Positions.Select(x => 
+                    new SharedPosition(
+                        ExchangeSymbolCache.ParseSymbol(_topicFuturesId, EnvironmentName, null, x.Symbol),
+                        x.Symbol,
+                        new SharedOrderQuantity(Math.Abs(x.NetQuantity)),
+                        null)
+                    {
+                        UnrealizedPnl = x.UnrealizedPnl.Value,
+                        LiquidationPrice = x.LiquidationPrice.Value == 0 ? null : x.LiquidationPrice.Value,
+                        Leverage = x.Leverage,
+                        AverageOpenPrice = x.EntryVolumeWeightedAveragePrice.Value,
+                        PositionMode = SharedPositionMode.HedgeMode,
+                        PositionSide = x.PositionSide == PositionSide.Short ? SharedPositionSide.Short : SharedPositionSide.Long
+                    }).ToArray());
             }
             else
             {
@@ -1445,13 +1462,18 @@ namespace Coinbase.Net.Clients.AdvancedTradeApi
                 if (!result.Success)
                     return HttpResult.Fail<SharedPosition[]>(result);
 
-                return HttpResult.Ok(result, result.Data.Select(x => new SharedPosition(ExchangeSymbolCache.ParseSymbol(_topicFuturesId, EnvironmentName, null, x.Symbol), x.Symbol, Math.Abs(x.NumberOfContracts), null)
-                {
-                    UnrealizedPnl = x.UnrealizedPnl,
-                    AverageOpenPrice = x.AverageEntryPrice,
-                    PositionMode = SharedPositionMode.HedgeMode,
-                    PositionSide = x.PositionSide == PositionSide.Short ? SharedPositionSide.Short : SharedPositionSide.Long
-                }).ToArray());
+                return HttpResult.Ok(result, result.Data.Select(x => 
+                    new SharedPosition(
+                        ExchangeSymbolCache.ParseSymbol(_topicFuturesId, EnvironmentName, null, x.Symbol), 
+                        x.Symbol,
+                        new SharedOrderQuantity(Math.Abs(x.NumberOfContracts)),
+                        null)
+                    {
+                        UnrealizedPnl = x.UnrealizedPnl,
+                        AverageOpenPrice = x.AverageEntryPrice,
+                        PositionMode = SharedPositionMode.HedgeMode,
+                        PositionSide = x.PositionSide == PositionSide.Short ? SharedPositionSide.Short : SharedPositionSide.Long
+                    }).ToArray());
             }
         }
 
