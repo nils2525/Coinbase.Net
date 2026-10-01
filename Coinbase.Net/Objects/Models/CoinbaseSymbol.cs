@@ -370,6 +370,21 @@ namespace Coinbase.Net.Objects.Models
         [JsonPropertyName("index_price")]
         public decimal? IndexPrice { get; set; }
         /// <summary>
+        /// ["<c>funding_interval</c>"] CDE funding interval, expressed as a duration such as "3600s", or null for contracts without funding
+        /// </summary>
+        [JsonPropertyName("funding_interval")]
+        public string? FundingInterval { get; set; }
+        /// <summary>
+        /// ["<c>funding_rate</c>"] CDE funding rate, or null when unavailable
+        /// </summary>
+        [JsonPropertyName("funding_rate")]
+        public decimal? FundingRate { get; set; }
+        /// <summary>
+        /// ["<c>funding_time</c>"] CDE funding time, or null when unavailable
+        /// </summary>
+        [JsonPropertyName("funding_time")]
+        public DateTime? FundingTime { get; set; }
+        /// <summary>
         /// ["<c>futures_asset_type</c>"] Asset type
         /// </summary>
         [JsonPropertyName("futures_asset_type")]
@@ -396,7 +411,7 @@ namespace Coinbase.Net.Objects.Models
         /// ["<c>funding_time</c>"] Funding time
         /// </summary>
         [JsonPropertyName("funding_time")]
-        public DateTime FundingTime { get; set; }
+        public DateTime? FundingTime { get; set; }
         /// <summary>
         /// ["<c>max_leverage</c>"] Max leverage
         /// </summary>
